@@ -3,14 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>双摆混沌物理模拟器</title>
+  <title>单摆天体场景模拟器</title>
   <style>
     :root {
-      --bg-1: #0a0d18;
-      --bg-2: #121a2d;
-      --panel: rgba(18, 24, 36, 0.58);
-      --line: rgba(180, 220, 255, 0.9);
-      --text: #eaf5ff;
+      --bg-1: #07111f;
+      --bg-2: #101d30;
+      --panel: rgba(12, 18, 32, 0.72);
+      --panel-border: rgba(163, 205, 255, 0.25);
+      --primary: #7ecbff;
+      --secondary: #98f0d4;
+      --text: #ebf7ff;
+      --muted: #a6bdd9;
+      --shadow: rgba(126, 203, 255, 0.30);
     }
 
     * {
@@ -23,45 +27,227 @@
       height: 100%;
       overflow: hidden;
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      background:
-        radial-gradient(circle at 50% 15%, rgba(110, 144, 255, 0.18), transparent 28%),
-        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      background: radial-gradient(circle at 50% 18%, rgba(92, 130, 255, 0.20), transparent 28%), linear-gradient(180deg, var(--bg-1), var(--bg-2));
       color: var(--text);
+    }
+
+    body {
+      position: relative;
     }
 
     canvas {
       display: block;
       width: 100vw;
       height: 100vh;
+      background: transparent;
       cursor: grab;
-      touch-action: none;
       user-select: none;
+      touch-action: none;
     }
 
     canvas.dragging {
       cursor: grabbing;
+    }
+
+    .panel {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      width: min(360px, calc(100vw - 32px));
+      padding: 14px 14px 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(255,255,255,0.03);
+      z-index: 2;
+    }
+
+    .preset-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .preset {
+      flex: 1 1 70px;
+      min-width: 70px;
+      border: 1px solid rgba(166, 189, 217, 0.28);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .preset:hover,
+    .preset:active {
+      transform: translateY(-1px);
+    }
+
+    .preset.active {
+      border-color: rgba(126, 203, 255, 0.75);
+      background: linear-gradient(135deg, rgba(126, 203, 255, 0.30), rgba(152, 240, 212, 0.20));
+      box-shadow: 0 0 0 1px rgba(126, 203, 255, 0.35), 0 0 18px rgba(126, 203, 255, 0.18);
+    }
+
+    .control-group {
+      margin-top: 10px;
+    }
+
+    .label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .value-pill {
+      min-width: 60px;
+      text-align: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(126, 203, 255, 0.10);
+      border: 1px solid rgba(126, 203, 255, 0.25);
+      color: var(--text);
+      font-weight: 700;
+      font-size: 0.75rem;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+
+    .footer-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .action-btn {
+      flex: 1 1 0;
+      border: 1px solid rgba(166, 189, 217, 0.28);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-size: 0.78rem;
+      font-weight: 700;
+      transition: background 0.18s ease, transform 0.18s ease;
+    }
+
+    .action-btn:hover {
+      background: rgba(255,255,255,0.08);
+      transform: translateY(-1px);
+    }
+
+    @media (max-width: 768px) {
+      .panel {
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        width: auto;
+        padding: 12px;
+      }
+
+      .preset {
+        flex: 1 1 22%;
+      }
     }
   </style>
 </head>
 <body>
   <canvas id="scene"></canvas>
 
+  <div class="panel" aria-label="单摆控制面板">
+    <div class="preset-row">
+      <button class="preset active" data-preset="earth">地球</button>
+      <button class="preset" data-preset="moon">月球</button>
+      <button class="preset" data-preset="jupiter">木星</button>
+      <button class="preset" data-preset="space">太空</button>
+    </div>
+
+    <div class="control-group">
+      <div class="label-row">
+        <span>重力</span>
+        <span class="value-pill" id="gravityValue">9.81</span>
+      </div>
+      <input id="gravity" type="range" min="0.1" max="30" step="0.1" value="9.81" />
+    </div>
+
+    <div class="control-group">
+      <div class="label-row">
+        <span>摆长</span>
+        <span class="value-pill" id="lengthValue">190</span>
+      </div>
+      <input id="length" type="range" min="90" max="260" step="1" value="190" />
+    </div>
+
+    <div class="control-group">
+      <div class="label-row">
+        <span>阻尼</span>
+        <span class="value-pill" id="dampingValue">0.996</span>
+      </div>
+      <input id="damping" type="range" min="0.90" max="0.999" step="0.001" value="0.996" />
+    </div>
+
+    <div class="control-group">
+      <div class="label-row">
+        <span>初始角度</span>
+        <span class="value-pill" id="angleValue">0.70</span>
+      </div>
+      <input id="angle" type="range" min="0.1" max="1.5" step="0.01" value="0.70" />
+    </div>
+
+    <div class="footer-row">
+      <button class="action-btn" id="resetBtn" type="button">重置</button>
+      <button class="action-btn" id="randomBtn" type="button">随机</button>
+    </div>
+  </div>
+
   <script>
-    const canvas = document.getElementById("scene");
-    const ctx = canvas.getContext("2d");
+    const STORAGE_KEY = "pendulum-scene-config-v1";
+
+    const presets = {
+      earth: { gravity: 9.81, length: 190, damping: 0.996, angle: 0.7 },
+      moon: { gravity: 1.62, length: 170, damping: 0.992, angle: 0.9 },
+      jupiter: { gravity: 24.79, length: 220, damping: 0.998, angle: 1.2 },
+      space: { gravity: 0.8, length: 200, damping: 0.998, angle: 0.95 }
+    };
+
+    const ui = {
+      gravity: document.getElementById("gravity"),
+      length: document.getElementById("length"),
+      damping: document.getElementById("damping"),
+      angle: document.getElementById("angle"),
+      gravityValue: document.getElementById("gravityValue"),
+      lengthValue: document.getElementById("lengthValue"),
+      dampingValue: document.getElementById("dampingValue"),
+      angleValue: document.getElementById("angleValue"),
+      resetBtn: document.getElementById("resetBtn"),
+      randomBtn: document.getElementById("randomBtn"),
+      presetButtons: [...document.querySelectorAll(".preset")]
+    };
 
     const pendulum = {
-      g: 9.8,
-      l1: 170,
-      l2: 150,
-      m1: 1.0,
-      m2: 1.4,
-      theta1: Math.PI / 2.3,
-      theta2: 0.6,
-      omega1: 0.0,
-      omega2: 0.0,
-      bobRadius: 15,
-      damping: 0.9998,
+      L: 190,
+      g: 9.81,
+      theta: 0.7,
+      omega: 0,
+      bobRadius: 24,
+      damping: 0.996,
       trail: []
     };
 
@@ -71,15 +257,125 @@
       pivotX: 0,
       pivotY: 0,
       dragging: false,
-      dragPointerId: null,
-      dragTarget: null,
-      lastPointerX: 0,
-      lastPointerY: 0,
+      pointerId: null,
       lastTimestamp: 0,
-      lastDragTheta1: pendulum.theta1,
-      lastDragTheta2: pendulum.theta2,
-      lastDragTime: 0
+      targetGravity: 9.81,
+      activePreset: "earth"
     };
+
+    const config = {
+      gravity: 9.81,
+      length: 190,
+      damping: 0.996,
+      angle: 0.7
+    };
+
+    function readConfig() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return null;
+        return parsed;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    function saveConfig() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      } catch (error) {
+        // ignore localStorage failures
+      }
+    }
+
+    function applyConfigToUI() {
+      ui.gravity.value = String(config.gravity);
+      ui.length.value = String(config.length);
+      ui.damping.value = String(config.damping);
+      ui.angle.value = String(config.angle);
+
+      ui.gravityValue.textContent = Number(config.gravity).toFixed(2);
+      ui.lengthValue.textContent = String(Math.round(config.length));
+      ui.dampingValue.textContent = Number(config.damping).toFixed(3);
+      ui.angleValue.textContent = Number(config.angle).toFixed(2);
+    }
+
+    function syncToPhysics() {
+      pendulum.L = config.length;
+      pendulum.g = state.targetGravity;
+      pendulum.damping = config.damping;
+      pendulum.theta = config.angle;
+      pendulum.omega = 0;
+      pendulum.trail = [];
+      state.targetGravity = config.gravity;
+    }
+
+    function setPreset(name) {
+      const preset = presets[name];
+      if (!preset) return;
+
+      state.activePreset = name;
+      config.gravity = preset.gravity;
+      config.length = preset.length;
+      config.damping = preset.damping;
+      config.angle = preset.angle;
+      state.targetGravity = preset.gravity;
+
+      applyConfigToUI();
+      syncToPhysics();
+      saveConfig();
+      updatePresetButtons();
+    }
+
+    function updatePresetButtons() {
+      ui.presetButtons.forEach((button) => {
+        const active = button.dataset.preset === state.activePreset;
+        button.classList.toggle("active", active);
+      });
+    }
+
+    function applyCustomSettings() {
+      config.gravity = Number(ui.gravity.value);
+      config.length = Number(ui.length.value);
+      config.damping = Number(ui.damping.value);
+      config.angle = Number(ui.angle.value);
+
+      ui.gravityValue.textContent = Number(config.gravity).toFixed(2);
+      ui.lengthValue.textContent = String(Math.round(config.length));
+      ui.dampingValue.textContent = Number(config.damping).toFixed(3);
+      ui.angleValue.textContent = Number(config.angle).toFixed(2);
+
+      state.activePreset = "custom";
+      updatePresetButtons();
+      state.targetGravity = config.gravity;
+      pendulum.L = config.length;
+      pendulum.damping = config.damping;
+      pendulum.theta = config.angle;
+      pendulum.omega = 0;
+      saveConfig();
+    }
+
+    function randomize() {
+      const minAngle = 0.25;
+      const maxAngle = 1.4;
+      const randomAngle = minAngle + Math.random() * (maxAngle - minAngle);
+      config.angle = Number(randomAngle.toFixed(2));
+      config.gravity = Number((Math.random() * 25 + 0.5).toFixed(2));
+      config.length = Math.round(130 + Math.random() * 90);
+      config.damping = Number((0.94 + Math.random() * 0.05).toFixed(3));
+
+      state.activePreset = "custom";
+      applyConfigToUI();
+      state.targetGravity = config.gravity;
+      pendulum.L = config.length;
+      pendulum.damping = config.damping;
+      pendulum.theta = config.angle;
+      pendulum.omega = 0;
+      saveConfig();
+      updatePresetButtons();
+    }
 
     function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
@@ -94,112 +390,26 @@
       state.pivotY = state.height * 0.18;
     }
 
-    function getPendulumPositions() {
-      const x1 = pendulum.l1 * Math.sin(pendulum.theta1);
-      const y1 = pendulum.l1 * Math.cos(pendulum.theta1);
-      const x2 = x1 + pendulum.l2 * Math.sin(pendulum.theta2);
-      const y2 = y1 + pendulum.l2 * Math.cos(pendulum.theta2);
-
+    function computeBobPosition() {
       return {
-        bob1: { x: state.pivotX + x1, y: state.pivotY + y1 },
-        bob2: { x: state.pivotX + x2, y: state.pivotY + y2 }
+        x: state.pivotX + pendulum.L * Math.sin(pendulum.theta),
+        y: state.pivotY + pendulum.L * Math.cos(pendulum.theta)
       };
-    }
-
-    function computeAccelerations(theta1, theta2, omega1, omega2) {
-      const m1 = pendulum.m1;
-      const m2 = pendulum.m2;
-      const g = pendulum.g;
-      const l1 = pendulum.l1;
-      const l2 = pendulum.l2;
-      const delta = theta1 - theta2;
-      const denom = 2 * m1 + m2 - m2 * Math.cos(2 * delta);
-
-      const alpha1 = (
-        -g * (2 * m1 + m2) * Math.sin(theta1)
-        - m2 * g * Math.sin(theta1 - 2 * theta2)
-        - 2 * Math.sin(delta) * m2 * (omega2 * omega2 * l2 + omega1 * omega1 * l1 * Math.cos(delta))
-      ) / (l1 * denom);
-
-      const alpha2 = (
-        2 * Math.sin(delta) * (
-          omega1 * omega1 * l1 * (m1 + m2)
-          + g * (m1 + m2) * Math.cos(theta1)
-          + omega2 * omega2 * l2 * m2 * Math.cos(delta)
-        )
-      ) / (l2 * denom);
-
-      return { alpha1, alpha2 };
-    }
-
-    function rk4Step(dt) {
-      const s0 = {
-        theta1: pendulum.theta1,
-        theta2: pendulum.theta2,
-        omega1: pendulum.omega1,
-        omega2: pendulum.omega2
-      };
-
-      const deriv = (stateVar) => {
-        const acc = computeAccelerations(stateVar.theta1, stateVar.theta2, stateVar.omega1, stateVar.omega2);
-        return {
-          theta1: stateVar.omega1,
-          theta2: stateVar.omega2,
-          omega1: acc.alpha1,
-          omega2: acc.alpha2
-        };
-      };
-
-      const k1 = deriv(s0);
-      const s1 = {
-        theta1: s0.theta1 + k1.theta1 * dt * 0.5,
-        theta2: s0.theta2 + k1.theta2 * dt * 0.5,
-        omega1: s0.omega1 + k1.omega1 * dt * 0.5,
-        omega2: s0.omega2 + k1.omega2 * dt * 0.5
-      };
-      const k2 = deriv(s1);
-
-      const s2 = {
-        theta1: s0.theta1 + k2.theta1 * dt * 0.5,
-        theta2: s0.theta2 + k2.theta2 * dt * 0.5,
-        omega1: s0.omega1 + k2.omega1 * dt * 0.5,
-        omega2: s0.omega2 + k2.omega2 * dt * 0.5
-      };
-      const k3 = deriv(s2);
-
-      const s3 = {
-        theta1: s0.theta1 + k3.theta1 * dt,
-        theta2: s0.theta2 + k3.theta2 * dt,
-        omega1: s0.omega1 + k3.omega1 * dt,
-        omega2: s0.omega2 + k3.omega2 * dt
-      };
-      const k4 = deriv(s3);
-
-      const next = {
-        theta1: s0.theta1 + (dt / 6) * (k1.theta1 + 2 * k2.theta1 + 2 * k3.theta1 + k4.theta1),
-        theta2: s0.theta2 + (dt / 6) * (k1.theta2 + 2 * k2.theta2 + 2 * k3.theta2 + k4.theta2),
-        omega1: s0.omega1 + (dt / 6) * (k1.omega1 + 2 * k2.omega1 + 2 * k3.omega1 + k4.omega1),
-        omega2: s0.omega2 + (dt / 6) * (k1.omega2 + 2 * k2.omega2 + 2 * k3.omega2 + k4.omega2)
-      };
-
-      return next;
     }
 
     function updatePhysics(dt) {
-      if (state.dragging) return;
+      pendulum.g += (state.targetGravity - pendulum.g) * 0.08;
 
-      const next = rk4Step(dt);
-
-      if (Number.isFinite(next.theta1) && Number.isFinite(next.theta2) && Number.isFinite(next.omega1) && Number.isFinite(next.omega2)) {
-        pendulum.theta1 = next.theta1;
-        pendulum.theta2 = next.theta2;
-        pendulum.omega1 = next.omega1 * pendulum.damping;
-        pendulum.omega2 = next.omega2 * pendulum.damping;
+      if (!state.dragging) {
+        const alpha = -(pendulum.g / pendulum.L) * Math.sin(pendulum.theta);
+        pendulum.omega += alpha * dt;
+        pendulum.omega *= pendulum.damping;
+        pendulum.theta += pendulum.omega * dt;
       }
 
-      const pos = getPendulumPositions();
-      pendulum.trail.push({ x: pos.bob2.x, y: pos.bob2.y });
-      if (pendulum.trail.length > 70) {
+      const bob = computeBobPosition();
+      pendulum.trail.push({ x: bob.x, y: bob.y });
+      if (pendulum.trail.length > 90) {
         pendulum.trail.shift();
       }
     }
@@ -210,16 +420,16 @@
       const gradient = ctx.createRadialGradient(
         state.width * 0.5,
         state.height * 0.2,
-        30,
+        20,
         state.width * 0.5,
-        state.height * 0.5,
-        state.height * 0.8
+        state.height * 0.6,
+        state.height * 0.9
       );
-      gradient.addColorStop(0, "rgba(97, 123, 255, 0.14)");
-      gradient.addColorStop(0.4, "rgba(38, 56, 82, 0.14)");
-      gradient.addColorStop(1, "rgba(8, 10, 18, 0.02)");
+      gradient.addColorStop(0, "rgba(88, 116, 255, 0.16)");
+      gradient.addColorStop(0.45, "rgba(20, 33, 52, 0.10)");
+      gradient.addColorStop(1, "rgba(7, 11, 18, 0.03)");
 
-      ctx.fillStyle = "#0d1320";
+      ctx.fillStyle = "#091524";
       ctx.fillRect(0, 0, state.width, state.height);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, state.width, state.height);
@@ -233,83 +443,51 @@
         const prev = pendulum.trail[i - 1];
         const cur = pendulum.trail[i];
         const alpha = (i / pendulum.trail.length) * 0.9;
-        const hue = 190 + (i / pendulum.trail.length) * 150;
-
+        const hue = 190 + (i / pendulum.trail.length) * 120;
         ctx.beginPath();
         ctx.moveTo(prev.x, prev.y);
         ctx.lineTo(cur.x, cur.y);
-        ctx.strokeStyle = `hsla(${hue}, 95%, 65%, ${alpha})`;
-        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = `hsla(${hue}, 90%, 68%, ${alpha})`;
+        ctx.lineWidth = 2.4;
+        ctx.shadowColor = `hsla(${hue}, 95%, 70%, 0.7)`;
         ctx.shadowBlur = 16;
-        ctx.shadowColor = `hsla(${hue}, 100%, 70%, 0.8)`;
         ctx.stroke();
       }
       ctx.restore();
     }
 
-    function drawDoublePendulum() {
-      const p1 = getPendulumPositions();
-      const bob1 = p1.bob1;
-      const bob2 = p1.bob2;
+    function drawPendulum() {
+      const bob = computeBobPosition();
 
       ctx.save();
 
       ctx.beginPath();
       ctx.moveTo(state.pivotX, state.pivotY);
-      ctx.lineTo(bob1.x, bob1.y);
-      ctx.lineTo(bob2.x, bob2.y);
-      ctx.strokeStyle = "rgba(218, 236, 255, 0.92)";
+      ctx.lineTo(bob.x, bob.y);
+      ctx.strokeStyle = "rgba(207, 228, 255, 0.95)";
       ctx.lineWidth = 3;
-      ctx.shadowColor = "rgba(148, 197, 255, 0.7)";
-      ctx.shadowBlur = 16;
+      ctx.shadowColor = "rgba(140, 197, 255, 0.8)";
+      ctx.shadowBlur = 18;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.arc(state.pivotX, state.pivotY, 8, 0, Math.PI * 2);
-      ctx.fillStyle = "#f9fdff";
-      ctx.shadowColor = "rgba(255,255,255,0.9)";
+      ctx.fillStyle = "#f0f8ff";
+      ctx.shadowColor = "rgba(255,255,255,0.75)";
       ctx.shadowBlur = 18;
       ctx.fill();
 
-      const bob1Gradient = ctx.createRadialGradient(
-        bob1.x - 8,
-        bob1.y - 8,
-        4,
-        bob1.x,
-        bob1.y,
-        pendulum.bobRadius + 18
-      );
-      bob1Gradient.addColorStop(0, "rgba(255,255,255,1)");
-      bob1Gradient.addColorStop(0.2, "rgba(188,220,255,0.95)");
-      bob1Gradient.addColorStop(0.7, "rgba(84,149,255,0.7)");
-      bob1Gradient.addColorStop(1, "rgba(50,72,125,0.8)");
+      const glow = ctx.createRadialGradient(bob.x - 10, bob.y - 10, 4, bob.x, bob.y, pendulum.bobRadius + 24);
+      glow.addColorStop(0, "rgba(255,255,255,1)");
+      glow.addColorStop(0.18, "rgba(154, 223, 255, 0.95)");
+      glow.addColorStop(0.65, "rgba(88, 137, 255, 0.70)");
+      glow.addColorStop(1, "rgba(38, 54, 107, 0.85)");
 
       ctx.beginPath();
-      ctx.arc(bob1.x, bob1.y, pendulum.bobRadius, 0, Math.PI * 2);
-      ctx.fillStyle = bob1Gradient;
-      ctx.shadowColor = "rgba(100,180,255,0.9)";
+      ctx.arc(bob.x, bob.y, pendulum.bobRadius, 0, Math.PI * 2);
+      ctx.fillStyle = glow;
+      ctx.shadowColor = "rgba(126, 203, 255, 0.95)";
       ctx.shadowBlur = 24;
-      ctx.fill();
-
-      const bob2Gradient = ctx.createRadialGradient(
-        bob2.x - 10,
-        bob2.y - 10,
-        6,
-        bob2.x,
-        bob2.y,
-        pendulum.bobRadius + 24
-      );
-      bob2Gradient.addColorStop(0, "rgba(255,255,255,0.98)");
-      bob2Gradient.addColorStop(0.15, "rgba(255,170,210,0.95)");
-      bob2Gradient.addColorStop(0.5, "rgba(117,236,255,0.8)");
-      bob2Gradient.addColorStop(0.75, "rgba(154,124,255,0.75)");
-      bob2Gradient.addColorStop(1, "rgba(52, 86, 128, 0.9)");
-
-      ctx.beginPath();
-      ctx.arc(bob2.x, bob2.y, pendulum.bobRadius + 4, 0, Math.PI * 2);
-      ctx.fillStyle = bob2Gradient;
-      ctx.shadowColor = "rgba(96,220,255,0.9)";
-      ctx.shadowBlur = 28;
       ctx.fill();
 
       ctx.restore();
@@ -324,108 +502,125 @@
     }
 
     function hitTest(point) {
-      const positions = getPendulumPositions();
-      const bob1Dist = Math.hypot(point.x - positions.bob1.x, point.y - positions.bob1.y);
-      const bob2Dist = Math.hypot(point.x - positions.bob2.x, point.y - positions.bob2.y);
-
-      if (bob1Dist <= pendulum.bobRadius + 18) return "bob1";
-      if (bob2Dist <= pendulum.bobRadius + 18) return "bob2";
-      return null;
-    }
-
-    function setDragStateFromPointer(point, target) {
-      if (target === "bob1") {
-        const targetAngle = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
-        pendulum.theta1 = targetAngle;
-        pendulum.omega1 = 0;
-      } else if (target === "bob2") {
-        const pos1 = getPendulumPositions().bob1;
-        const dx = point.x - pos1.x;
-        const dy = point.y - pos1.y;
-        pendulum.theta2 = Math.atan2(dx, dy);
-        pendulum.omega2 = 0;
-      }
+      const bob = computeBobPosition();
+      const distance = Math.hypot(point.x - bob.x, point.y - bob.y);
+      return distance <= pendulum.bobRadius + 14 ? true : false;
     }
 
     function onPointerDown(event) {
       const point = pointerToCanvas(event);
-      const target = hitTest(point);
-      if (!target) return;
+      if (!hitTest(point)) return;
 
       state.dragging = true;
-      state.dragPointerId = event.pointerId;
-      state.dragTarget = target;
+      state.pointerId = event.pointerId;
       canvas.classList.add("dragging");
-
-      state.lastPointerX = point.x;
-      state.lastPointerY = point.y;
-      state.lastDragTheta1 = pendulum.theta1;
-      state.lastDragTheta2 = pendulum.theta2;
-      state.lastDragTime = performance.now();
-
-      setDragStateFromPointer(point, target);
+      pendulum.theta = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
+      pendulum.omega = 0;
     }
 
     function onPointerMove(event) {
-      if (!state.dragging || event.pointerId !== state.dragPointerId) return;
-
+      if (!state.dragging || event.pointerId !== state.pointerId) return;
       const point = pointerToCanvas(event);
-      const now = performance.now();
-      const dt = Math.max((now - state.lastDragTime) / 1000, 0.016);
-
-      if (state.dragTarget === "bob1") {
-        const theta = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
-        const dTheta = theta - state.lastDragTheta1;
-        pendulum.theta1 = theta;
-        pendulum.omega1 = dTheta / dt;
-        state.lastDragTheta1 = theta;
-      } else if (state.dragTarget === "bob2") {
-        const pos1 = getPendulumPositions().bob1;
-        const dx = point.x - pos1.x;
-        const dy = point.y - pos1.y;
-        const theta = Math.atan2(dx, dy);
-        const dTheta = theta - state.lastDragTheta2;
-        pendulum.theta2 = theta;
-        pendulum.omega2 = dTheta / dt;
-        state.lastDragTheta2 = theta;
-      }
-
-      state.lastPointerX = point.x;
-      state.lastPointerY = point.y;
-      state.lastDragTime = now;
+      pendulum.theta = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
+      pendulum.omega = 0;
+      config.angle = Number(pendulum.theta.toFixed(2));
+      ui.angle.value = String(config.angle);
+      ui.angleValue.textContent = Number(config.angle).toFixed(2);
+      state.activePreset = "custom";
+      updatePresetButtons();
+      saveConfig();
     }
 
     function onPointerUp(event) {
-      if (event.pointerId !== state.dragPointerId) return;
+      if (event.pointerId !== state.pointerId) return;
       state.dragging = false;
-      state.dragPointerId = null;
-      state.dragTarget = null;
+      state.pointerId = null;
       canvas.classList.remove("dragging");
+      config.angle = Number(pendulum.theta.toFixed(2));
+      ui.angle.value = String(config.angle);
+      ui.angleValue.textContent = Number(config.angle).toFixed(2);
+      saveConfig();
     }
 
     function animate(timestamp) {
-      if (!state.lastTimestamp) {
-        state.lastTimestamp = timestamp;
-      }
-
+      if (!state.lastTimestamp) state.lastTimestamp = timestamp;
       const dt = Math.min((timestamp - state.lastTimestamp) / 1000, 0.03);
       state.lastTimestamp = timestamp;
 
       updatePhysics(dt);
       drawBackground();
       drawTrail();
-      drawDoublePendulum();
+      drawPendulum();
 
       requestAnimationFrame(animate);
     }
+
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+
+    ui.gravity.addEventListener("input", () => {
+      applyCustomSettings();
+    });
+
+    ui.length.addEventListener("input", () => {
+      applyCustomSettings();
+    });
+
+    ui.damping.addEventListener("input", () => {
+      applyCustomSettings();
+    });
+
+    ui.angle.addEventListener("input", () => {
+      applyCustomSettings();
+    });
+
+    ui.resetBtn.addEventListener("click", () => {
+      const saved = readConfig();
+      const fallback = { gravity: 9.81, length: 190, damping: 0.996, angle: 0.7 };
+      const target = saved || fallback;
+      config.gravity = Number(target.gravity);
+      config.length = Number(target.length);
+      config.damping = Number(target.damping);
+      config.angle = Number(target.angle);
+      state.targetGravity = config.gravity;
+      state.activePreset = "custom";
+      applyConfigToUI();
+      syncToPhysics();
+      saveConfig();
+      updatePresetButtons();
+    });
+
+    ui.randomBtn.addEventListener("click", () => {
+      randomize();
+    });
+
+    ui.presetButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        setPreset(button.dataset.preset);
+      });
+    });
 
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointerleave", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
+
     window.addEventListener("resize", resizeCanvas, { passive: true });
 
+    const storedConfig = readConfig();
+    if (storedConfig) {
+      config.gravity = Number(storedConfig.gravity ?? 9.81);
+      config.length = Number(storedConfig.length ?? 190);
+      config.damping = Number(storedConfig.damping ?? 0.996);
+      config.angle = Number(storedConfig.angle ?? 0.7);
+      state.targetGravity = config.gravity;
+      state.activePreset = "custom";
+    }
+
+    applyConfigToUI();
+    syncToPhysics();
+    updatePresetButtons();
     resizeCanvas();
     requestAnimationFrame(animate);
   </script>
