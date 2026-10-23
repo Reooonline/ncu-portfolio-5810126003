@@ -219,6 +219,7 @@
 
   <script>
     const STORAGE_KEY = "pendulum-scene-config-v1";
+    const FACE_SET = ["🙂", "😄", "😎", "😌", "🤪", "😵", "😲", "😜"];
 
     const presets = {
       earth: { gravity: 9.81, length: 190, damping: 0.996, angle: 0.7 },
@@ -248,7 +249,9 @@
       omega: 0,
       bobRadius: 24,
       damping: 0.996,
-      trail: []
+      trail: [],
+      faceIndex: 0,
+      lastTheta: 0.7
     };
 
     const state = {
@@ -290,6 +293,18 @@
       }
     }
 
+    function triggerFaceChange() {
+      pendulum.faceIndex = (pendulum.faceIndex + 1) % FACE_SET.length;
+    }
+
+    function updateFaceBySwing() {
+      const crossedZero = (pendulum.lastTheta > 0 && pendulum.theta <= 0) || (pendulum.lastTheta < 0 && pendulum.theta >= 0);
+      if (crossedZero) {
+        triggerFaceChange();
+      }
+      pendulum.lastTheta = pendulum.theta;
+    }
+
     function applyConfigToUI() {
       ui.gravity.value = String(config.gravity);
       ui.length.value = String(config.length);
@@ -309,6 +324,7 @@
       pendulum.theta = config.angle;
       pendulum.omega = 0;
       pendulum.trail = [];
+      pendulum.lastTheta = pendulum.theta;
       state.targetGravity = config.gravity;
     }
 
@@ -405,6 +421,7 @@
         pendulum.omega += alpha * dt;
         pendulum.omega *= pendulum.damping;
         pendulum.theta += pendulum.omega * dt;
+        updateFaceBySwing();
       }
 
       const bob = computeBobPosition();
@@ -490,6 +507,12 @@
       ctx.shadowBlur = 24;
       ctx.fill();
 
+      ctx.font = '42px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowBlur = 0;
+      ctx.fillText(FACE_SET[pendulum.faceIndex], bob.x, bob.y + 3);
+
       ctx.restore();
     }
 
@@ -516,6 +539,7 @@
       canvas.classList.add("dragging");
       pendulum.theta = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
       pendulum.omega = 0;
+      triggerFaceChange();
     }
 
     function onPointerMove(event) {
@@ -529,6 +553,7 @@
       state.activePreset = "custom";
       updatePresetButtons();
       saveConfig();
+      triggerFaceChange();
     }
 
     function onPointerUp(event) {
@@ -540,6 +565,7 @@
       ui.angle.value = String(config.angle);
       ui.angleValue.textContent = Number(config.angle).toFixed(2);
       saveConfig();
+      triggerFaceChange();
     }
 
     function animate(timestamp) {
