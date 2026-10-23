@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>可交互拖拽单摆模拟器</title>
+  <title>双摆混沌物理模拟器</title>
   <style>
     :root {
-      --bg: #1a1a24;
-      --bg-2: #23262f;
-      --rod: rgba(188, 220, 255, 0.9);
-      --bob-glow: rgba(129, 209, 255, 0.8);
+      --bg-1: #0a0d18;
+      --bg-2: #121a2d;
+      --panel: rgba(18, 24, 36, 0.58);
+      --line: rgba(180, 220, 255, 0.9);
+      --text: #eaf5ff;
     }
 
     * {
@@ -21,27 +22,20 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: var(--bg);
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
       background:
-        radial-gradient(circle at 50% 20%, rgba(134, 168, 255, 0.12), transparent 34%),
-        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        radial-gradient(circle at 50% 15%, rgba(110, 144, 255, 0.18), transparent 28%),
+        linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+      color: var(--text);
     }
 
     canvas {
       display: block;
       width: 100vw;
       height: 100vh;
-      background: transparent;
       cursor: grab;
-      user-select: none;
       touch-action: none;
+      user-select: none;
     }
 
     canvas.dragging {
@@ -57,14 +51,18 @@
     const ctx = canvas.getContext("2d");
 
     const pendulum = {
-      L: 200,
       g: 9.8,
-      theta: Math.PI / 4,
-      omega: 0,
-      damping: 0.9995,
-      bobRadius: 28,
-      faces: ["🙂", "😄", "😎", "😌", "🤪", "😵"],
-      currentFace: 0
+      l1: 170,
+      l2: 150,
+      m1: 1.0,
+      m2: 1.4,
+      theta1: Math.PI / 2.3,
+      theta2: 0.6,
+      omega1: 0.0,
+      omega2: 0.0,
+      bobRadius: 15,
+      damping: 0.9998,
+      trail: []
     };
 
     const state = {
@@ -74,10 +72,13 @@
       pivotY: 0,
       dragging: false,
       dragPointerId: null,
+      dragTarget: null,
       lastPointerX: 0,
       lastPointerY: 0,
-      lastTheta: pendulum.theta,
-      lastTimestamp: 0
+      lastTimestamp: 0,
+      lastDragTheta1: pendulum.theta1,
+      lastDragTheta2: pendulum.theta2,
+      lastDragTime: 0
     };
 
     function resizeCanvas() {
@@ -89,175 +90,331 @@
       canvas.style.width = state.width + "px";
       canvas.style.height = state.height + "px";
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      state.pivotX = state.width / 2;
+      state.pivotX = state.width * 0.5;
       state.pivotY = state.height * 0.18;
     }
 
-    function computeBobPosition() {
+    function getPendulumPositions() {
+      const x1 = pendulum.l1 * Math.sin(pendulum.theta1);
+      const y1 = pendulum.l1 * Math.cos(pendulum.theta1);
+      const x2 = x1 + pendulum.l2 * Math.sin(pendulum.theta2);
+      const y2 = y1 + pendulum.l2 * Math.cos(pendulum.theta2);
+
       return {
-        x: state.pivotX + pendulum.L * Math.sin(pendulum.theta),
-        y: state.pivotY + pendulum.L * Math.cos(pendulum.theta)
+        bob1: { x: state.pivotX + x1, y: state.pivotY + y1 },
+        bob2: { x: state.pivotX + x2, y: state.pivotY + y2 }
       };
     }
 
-    function updateFaceBySwing() {
-      const crossedZero =
-        (state.lastTheta > 0 && pendulum.theta <= 0) ||
-        (state.lastTheta < 0 && pendulum.theta >= 0);
+    function computeAccelerations(theta1, theta2, omega1, omega2) {
+      const m1 = pendulum.m1;
+      const m2 = pendulum.m2;
+      const g = pendulum.g;
+      const l1 = pendulum.l1;
+      const l2 = pendulum.l2;
+      const delta = theta1 - theta2;
+      const denom = 2 * m1 + m2 - m2 * Math.cos(2 * delta);
 
-      if (crossedZero) {
-        pendulum.currentFace = (pendulum.currentFace + 1) % pendulum.faces.length;
-      }
+      const alpha1 = (
+        -g * (2 * m1 + m2) * Math.sin(theta1)
+        - m2 * g * Math.sin(theta1 - 2 * theta2)
+        - 2 * Math.sin(delta) * m2 * (omega2 * omega2 * l2 + omega1 * omega1 * l1 * Math.cos(delta))
+      ) / (l1 * denom);
 
-      state.lastTheta = pendulum.theta;
+      const alpha2 = (
+        2 * Math.sin(delta) * (
+          omega1 * omega1 * l1 * (m1 + m2)
+          + g * (m1 + m2) * Math.cos(theta1)
+          + omega2 * omega2 * l2 * m2 * Math.cos(delta)
+        )
+      ) / (l2 * denom);
+
+      return { alpha1, alpha2 };
+    }
+
+    function rk4Step(dt) {
+      const s0 = {
+        theta1: pendulum.theta1,
+        theta2: pendulum.theta2,
+        omega1: pendulum.omega1,
+        omega2: pendulum.omega2
+      };
+
+      const deriv = (stateVar) => {
+        const acc = computeAccelerations(stateVar.theta1, stateVar.theta2, stateVar.omega1, stateVar.omega2);
+        return {
+          theta1: stateVar.omega1,
+          theta2: stateVar.omega2,
+          omega1: acc.alpha1,
+          omega2: acc.alpha2
+        };
+      };
+
+      const k1 = deriv(s0);
+      const s1 = {
+        theta1: s0.theta1 + k1.theta1 * dt * 0.5,
+        theta2: s0.theta2 + k1.theta2 * dt * 0.5,
+        omega1: s0.omega1 + k1.omega1 * dt * 0.5,
+        omega2: s0.omega2 + k1.omega2 * dt * 0.5
+      };
+      const k2 = deriv(s1);
+
+      const s2 = {
+        theta1: s0.theta1 + k2.theta1 * dt * 0.5,
+        theta2: s0.theta2 + k2.theta2 * dt * 0.5,
+        omega1: s0.omega1 + k2.omega1 * dt * 0.5,
+        omega2: s0.omega2 + k2.omega2 * dt * 0.5
+      };
+      const k3 = deriv(s2);
+
+      const s3 = {
+        theta1: s0.theta1 + k3.theta1 * dt,
+        theta2: s0.theta2 + k3.theta2 * dt,
+        omega1: s0.omega1 + k3.omega1 * dt,
+        omega2: s0.omega2 + k3.omega2 * dt
+      };
+      const k4 = deriv(s3);
+
+      const next = {
+        theta1: s0.theta1 + (dt / 6) * (k1.theta1 + 2 * k2.theta1 + 2 * k3.theta1 + k4.theta1),
+        theta2: s0.theta2 + (dt / 6) * (k1.theta2 + 2 * k2.theta2 + 2 * k3.theta2 + k4.theta2),
+        omega1: s0.omega1 + (dt / 6) * (k1.omega1 + 2 * k2.omega1 + 2 * k3.omega1 + k4.omega1),
+        omega2: s0.omega2 + (dt / 6) * (k1.omega2 + 2 * k2.omega2 + 2 * k3.omega2 + k4.omega2)
+      };
+
+      return next;
     }
 
     function updatePhysics(dt) {
       if (state.dragging) return;
-      const alpha = -(pendulum.g / pendulum.L) * Math.sin(pendulum.theta);
 
-      pendulum.omega += alpha * dt;
-      pendulum.omega *= pendulum.damping;
-      pendulum.theta += pendulum.omega * dt;
+      const next = rk4Step(dt);
 
-      updateFaceBySwing();
+      if (Number.isFinite(next.theta1) && Number.isFinite(next.theta2) && Number.isFinite(next.omega1) && Number.isFinite(next.omega2)) {
+        pendulum.theta1 = next.theta1;
+        pendulum.theta2 = next.theta2;
+        pendulum.omega1 = next.omega1 * pendulum.damping;
+        pendulum.omega2 = next.omega2 * pendulum.damping;
+      }
+
+      const pos = getPendulumPositions();
+      pendulum.trail.push({ x: pos.bob2.x, y: pos.bob2.y });
+      if (pendulum.trail.length > 70) {
+        pendulum.trail.shift();
+      }
     }
 
     function drawBackground() {
       ctx.clearRect(0, 0, state.width, state.height);
 
-      const bgGradient = ctx.createRadialGradient(
-        state.width * 0.5, state.height * 0.32, 20,
-        state.width * 0.5, state.height * 0.5, state.height * 0.8
+      const gradient = ctx.createRadialGradient(
+        state.width * 0.5,
+        state.height * 0.2,
+        30,
+        state.width * 0.5,
+        state.height * 0.5,
+        state.height * 0.8
       );
-      bgGradient.addColorStop(0, "rgba(95, 120, 200, 0.10)");
-      bgGradient.addColorStop(0.4, "rgba(44, 58, 80, 0.12)");
-      bgGradient.addColorStop(1, "rgba(18, 20, 26, 0.02)");
+      gradient.addColorStop(0, "rgba(97, 123, 255, 0.14)");
+      gradient.addColorStop(0.4, "rgba(38, 56, 82, 0.14)");
+      gradient.addColorStop(1, "rgba(8, 10, 18, 0.02)");
 
-      ctx.fillStyle = "#1a1a24";
+      ctx.fillStyle = "#0d1320";
       ctx.fillRect(0, 0, state.width, state.height);
-
-      ctx.fillStyle = bgGradient;
+      ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, state.width, state.height);
     }
 
-    function drawPendulum() {
-      const bob = computeBobPosition();
+    function drawTrail() {
+      if (pendulum.trail.length < 2) return;
+
+      ctx.save();
+      for (let i = 1; i < pendulum.trail.length; i++) {
+        const prev = pendulum.trail[i - 1];
+        const cur = pendulum.trail[i];
+        const alpha = (i / pendulum.trail.length) * 0.9;
+        const hue = 190 + (i / pendulum.trail.length) * 150;
+
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(cur.x, cur.y);
+        ctx.strokeStyle = `hsla(${hue}, 95%, 65%, ${alpha})`;
+        ctx.lineWidth = 2.2;
+        ctx.shadowBlur = 16;
+        ctx.shadowColor = `hsla(${hue}, 100%, 70%, 0.8)`;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawDoublePendulum() {
+      const p1 = getPendulumPositions();
+      const bob1 = p1.bob1;
+      const bob2 = p1.bob2;
 
       ctx.save();
 
       ctx.beginPath();
       ctx.moveTo(state.pivotX, state.pivotY);
-      ctx.lineTo(bob.x, bob.y);
-      ctx.strokeStyle = "rgba(200, 226, 255, 0.9)";
+      ctx.lineTo(bob1.x, bob1.y);
+      ctx.lineTo(bob2.x, bob2.y);
+      ctx.strokeStyle = "rgba(218, 236, 255, 0.92)";
       ctx.lineWidth = 3;
-      ctx.shadowColor = "rgba(120, 190, 255, 0.8)";
-      ctx.shadowBlur = 18;
+      ctx.shadowColor = "rgba(148, 197, 255, 0.7)";
+      ctx.shadowBlur = 16;
       ctx.stroke();
 
       ctx.beginPath();
       ctx.arc(state.pivotX, state.pivotY, 8, 0, Math.PI * 2);
-      ctx.fillStyle = "#ebf7ff";
-      ctx.shadowColor = "rgba(255,255,255,0.7)";
+      ctx.fillStyle = "#f9fdff";
+      ctx.shadowColor = "rgba(255,255,255,0.9)";
       ctx.shadowBlur = 18;
       ctx.fill();
 
-      ctx.beginPath();
-      ctx.arc(bob.x, bob.y, pendulum.bobRadius + 12, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(111, 194, 255, 0.14)";
-      ctx.shadowColor = "rgba(110, 200, 255, 0.8)";
-      ctx.shadowBlur = 30;
-      ctx.fill();
-
-      const bobGradient = ctx.createRadialGradient(
-        bob.x - 10, bob.y - 10, 4,
-        bob.x, bob.y, pendulum.bobRadius + 20
+      const bob1Gradient = ctx.createRadialGradient(
+        bob1.x - 8,
+        bob1.y - 8,
+        4,
+        bob1.x,
+        bob1.y,
+        pendulum.bobRadius + 18
       );
-      bobGradient.addColorStop(0, "rgba(255,255,255,0.95)");
-      bobGradient.addColorStop(0.15, "rgba(180, 225, 255, 0.95)");
-      bobGradient.addColorStop(0.5, "rgba(96, 177, 255, 0.75)");
-      bobGradient.addColorStop(1, "rgba(60, 82, 128, 0.8)");
+      bob1Gradient.addColorStop(0, "rgba(255,255,255,1)");
+      bob1Gradient.addColorStop(0.2, "rgba(188,220,255,0.95)");
+      bob1Gradient.addColorStop(0.7, "rgba(84,149,255,0.7)");
+      bob1Gradient.addColorStop(1, "rgba(50,72,125,0.8)");
 
       ctx.beginPath();
-      ctx.arc(bob.x, bob.y, pendulum.bobRadius, 0, Math.PI * 2);
-      ctx.fillStyle = bobGradient;
-      ctx.shadowColor = "rgba(140, 210, 255, 0.85)";
-      ctx.shadowBlur = 22;
+      ctx.arc(bob1.x, bob1.y, pendulum.bobRadius, 0, Math.PI * 2);
+      ctx.fillStyle = bob1Gradient;
+      ctx.shadowColor = "rgba(100,180,255,0.9)";
+      ctx.shadowBlur = 24;
       ctx.fill();
 
-      ctx.font = '42px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowBlur = 0;
-      ctx.fillText(pendulum.faces[pendulum.currentFace], bob.x, bob.y + 4);
+      const bob2Gradient = ctx.createRadialGradient(
+        bob2.x - 10,
+        bob2.y - 10,
+        6,
+        bob2.x,
+        bob2.y,
+        pendulum.bobRadius + 24
+      );
+      bob2Gradient.addColorStop(0, "rgba(255,255,255,0.98)");
+      bob2Gradient.addColorStop(0.15, "rgba(255,170,210,0.95)");
+      bob2Gradient.addColorStop(0.5, "rgba(117,236,255,0.8)");
+      bob2Gradient.addColorStop(0.75, "rgba(154,124,255,0.75)");
+      bob2Gradient.addColorStop(1, "rgba(52, 86, 128, 0.9)");
+
+      ctx.beginPath();
+      ctx.arc(bob2.x, bob2.y, pendulum.bobRadius + 4, 0, Math.PI * 2);
+      ctx.fillStyle = bob2Gradient;
+      ctx.shadowColor = "rgba(96,220,255,0.9)";
+      ctx.shadowBlur = 28;
+      ctx.fill();
 
       ctx.restore();
     }
 
-    function pointToCanvas(event) {
+    function pointerToCanvas(event) {
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      return { x, y };
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
     }
 
-    function angleFromPointer(x, y) {
-      const dx = x - state.pivotX;
-      const dy = y - state.pivotY;
-      const angle = Math.atan2(dx, dy);
-      return angle;
+    function hitTest(point) {
+      const positions = getPendulumPositions();
+      const bob1Dist = Math.hypot(point.x - positions.bob1.x, point.y - positions.bob1.y);
+      const bob2Dist = Math.hypot(point.x - positions.bob2.x, point.y - positions.bob2.y);
+
+      if (bob1Dist <= pendulum.bobRadius + 18) return "bob1";
+      if (bob2Dist <= pendulum.bobRadius + 18) return "bob2";
+      return null;
+    }
+
+    function setDragStateFromPointer(point, target) {
+      if (target === "bob1") {
+        const targetAngle = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
+        pendulum.theta1 = targetAngle;
+        pendulum.omega1 = 0;
+      } else if (target === "bob2") {
+        const pos1 = getPendulumPositions().bob1;
+        const dx = point.x - pos1.x;
+        const dy = point.y - pos1.y;
+        pendulum.theta2 = Math.atan2(dx, dy);
+        pendulum.omega2 = 0;
+      }
     }
 
     function onPointerDown(event) {
-      const p = pointToCanvas(event);
-      const bob = computeBobPosition();
-      const distance = Math.hypot(p.x - bob.x, p.y - bob.y);
+      const point = pointerToCanvas(event);
+      const target = hitTest(point);
+      if (!target) return;
 
-      if (distance <= pendulum.bobRadius + 15 || Math.abs(p.x - state.pivotX) < 30) {
-        state.dragging = true;
-        canvas.classList.add("dragging");
-        state.dragPointerId = event.pointerId;
-        state.lastPointerX = p.x;
-        state.lastPointerY = p.y;
+      state.dragging = true;
+      state.dragPointerId = event.pointerId;
+      state.dragTarget = target;
+      canvas.classList.add("dragging");
 
-        pendulum.theta = angleFromPointer(p.x, p.y);
-        pendulum.omega = 0;
-      }
+      state.lastPointerX = point.x;
+      state.lastPointerY = point.y;
+      state.lastDragTheta1 = pendulum.theta1;
+      state.lastDragTheta2 = pendulum.theta2;
+      state.lastDragTime = performance.now();
+
+      setDragStateFromPointer(point, target);
     }
 
     function onPointerMove(event) {
       if (!state.dragging || event.pointerId !== state.dragPointerId) return;
 
-      const p = pointToCanvas(event);
-      const dx = p.x - state.lastPointerX;
-      const dy = p.y - state.lastPointerY;
+      const point = pointerToCanvas(event);
+      const now = performance.now();
+      const dt = Math.max((now - state.lastDragTime) / 1000, 0.016);
 
-      const angle = angleFromPointer(p.x, p.y);
-      pendulum.theta = angle;
+      if (state.dragTarget === "bob1") {
+        const theta = Math.atan2(point.x - state.pivotX, point.y - state.pivotY);
+        const dTheta = theta - state.lastDragTheta1;
+        pendulum.theta1 = theta;
+        pendulum.omega1 = dTheta / dt;
+        state.lastDragTheta1 = theta;
+      } else if (state.dragTarget === "bob2") {
+        const pos1 = getPendulumPositions().bob1;
+        const dx = point.x - pos1.x;
+        const dy = point.y - pos1.y;
+        const theta = Math.atan2(dx, dy);
+        const dTheta = theta - state.lastDragTheta2;
+        pendulum.theta2 = theta;
+        pendulum.omega2 = dTheta / dt;
+        state.lastDragTheta2 = theta;
+      }
 
-      const dragSpeed = (dx * dx + dy * dy) ** 0.5;
-      pendulum.omega = (dragSpeed / 1800) * (dx < 0 ? -1 : 1);
-
-      state.lastPointerX = p.x;
-      state.lastPointerY = p.y;
+      state.lastPointerX = point.x;
+      state.lastPointerY = point.y;
+      state.lastDragTime = now;
     }
 
     function onPointerUp(event) {
       if (event.pointerId !== state.dragPointerId) return;
       state.dragging = false;
-      canvas.classList.remove("dragging");
       state.dragPointerId = null;
+      state.dragTarget = null;
+      canvas.classList.remove("dragging");
     }
 
     function animate(timestamp) {
-      if (!state.lastTimestamp) state.lastTimestamp = timestamp;
-      const dt = Math.min((timestamp - state.lastTimestamp) / 1000, 0.033);
+      if (!state.lastTimestamp) {
+        state.lastTimestamp = timestamp;
+      }
+
+      const dt = Math.min((timestamp - state.lastTimestamp) / 1000, 0.03);
       state.lastTimestamp = timestamp;
 
       updatePhysics(dt);
       drawBackground();
-      drawPendulum();
+      drawTrail();
+      drawDoublePendulum();
 
       requestAnimationFrame(animate);
     }
@@ -267,7 +424,6 @@
     canvas.addEventListener("pointerup", onPointerUp);
     canvas.addEventListener("pointerleave", onPointerUp);
     canvas.addEventListener("pointercancel", onPointerUp);
-
     window.addEventListener("resize", resizeCanvas, { passive: true });
 
     resizeCanvas();
