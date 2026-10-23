@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>可交互拖拽单摆模拟器</title>
+  <style>
+    :root {
+      --bg: #1a1a24;
+      --bg-2: #23262f;
+      --rod: rgba(188, 220, 255, 0.9);
+      --bob-glow: rgba(129, 209, 255, 0.8);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(134, 168, 255, 0.12), transparent 34%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: transparent;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    canvas.dragging {
+      cursor: grabbing;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <script>
+    const canvas = document.getElementById("scene");
+    const ctx = canvas.getContext("2d");
+
+    const pendulum = {
+      L: 200,
+      g: 9.8,
+      theta: Math.PI / 4,
+      omega: 0,
+      damping: 0.9995,
+      bobRadius: 28,
+      faces: ["🙂", "😄", "😎", "😌", "🤪", "😵"],
+      currentFace: 0
+    };
+
+    const state = {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      pivotX: 0,
+      pivotY: 0,
+      dragging: false,
+      dragPointerId: null,
+      lastPointerX: 0,
+      lastPointerY: 0,
+      lastTheta: pendulum.theta,
+      lastTimestamp: 0
+    };
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      state.width = window.innerWidth;
+      state.height = window.innerHeight;
+      canvas.width = Math.floor(state.width * dpr);
+      canvas.height = Math.floor(state.height * dpr);
+      canvas.style.width = state.width + "px";
+      canvas.style.height = state.height + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      state.pivotX = state.width / 2;
+      state.pivotY = state.height * 0.18;
+    }
+
+    function computeBobPosition() {
+      return {
+        x: state.pivotX + pendulum.L * Math.sin(pendulum.theta),
+        y: state.pivotY + pendulum.L * Math.cos(pendulum.theta)
+      };
+    }
+
+    function updateFaceBySwing() {
+      const crossedZero =
+        (state.lastTheta > 0 && pendulum.theta <= 0) ||
+        (state.lastTheta < 0 && pendulum.theta >= 0);
+
+      if (crossedZero) {
+        pendulum.currentFace = (pendulum.currentFace + 1) % pendulum.faces.length;
+      }
+
+      state.lastTheta = pendulum.theta;
+    }
+
+    function updatePhysics(dt) {
+      if (state.dragging) return;
+      const alpha = -(pendulum.g / pendulum.L) * Math.sin(pendulum.theta);
+
+      pendulum.omega += alpha * dt;
+      pendulum.omega *= pendulum.damping;
+      pendulum.theta += pendulum.omega * dt;
+
+      updateFaceBySwing();
+    }
+
+    function drawBackground() {
+      ctx.clearRect(0, 0, state.width, state.height);
+
+      const bgGradient = ctx.createRadialGradient(
+        state.width * 0.5, state.height * 0.32, 20,
+        state.width * 0.5, state.height * 0.5, state.height * 0.8
+      );
+      bgGradient.addColorStop(0, "rgba(95, 120, 200, 0.10)");
+      bgGradient.addColorStop(0.4, "rgba(44, 58, 80, 0.12)");
+      bgGradient.addColorStop(1, "rgba(18, 20, 26, 0.02)");
+
+      ctx.fillStyle = "#1a1a24";
+      ctx.fillRect(0, 0, state.width, state.height);
+
+      ctx.fillStyle = bgGradient;
+      ctx.fillRect(0, 0, state.width, state.height);
+    }
+
+    function drawPendulum() {
+      const bob = computeBobPosition();
+
+      ctx.save();
+
+      ctx.beginPath();
+      ctx.moveTo(state.pivotX, state.pivotY);
+      ctx.lineTo(bob.x, bob.y);
+      ctx.strokeStyle = "rgba(200, 226, 255, 0.9)";
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "rgba(120, 190, 255, 0.8)";
+      ctx.shadowBlur = 18;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(state.pivotX, state.pivotY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = "#ebf7ff";
+      ctx.shadowColor = "rgba(255,255,255,0.7)";
+      ctx.shadowBlur = 18;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(bob.x, bob.y, pendulum.bobRadius + 12, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(111, 194, 255, 0.14)";
+      ctx.shadowColor = "rgba(110, 200, 255, 0.8)";
+      ctx.shadowBlur = 30;
+      ctx.fill();
+
+      const bobGradient = ctx.createRadialGradient(
+        bob.x - 10, bob.y - 10, 4,
+        bob.x, bob.y, pendulum.bobRadius + 20
+      );
+      bobGradient.addColorStop(0, "rgba(255,255,255,0.95)");
+      bobGradient.addColorStop(0.15, "rgba(180, 225, 255, 0.95)");
+      bobGradient.addColorStop(0.5, "rgba(96, 177, 255, 0.75)");
+      bobGradient.addColorStop(1, "rgba(60, 82, 128, 0.8)");
+
+      ctx.beginPath();
+      ctx.arc(bob.x, bob.y, pendulum.bobRadius, 0, Math.PI * 2);
+      ctx.fillStyle = bobGradient;
+      ctx.shadowColor = "rgba(140, 210, 255, 0.85)";
+      ctx.shadowBlur = 22;
+      ctx.fill();
+
+      ctx.font = '42px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowBlur = 0;
+      ctx.fillText(pendulum.faces[pendulum.currentFace], bob.x, bob.y + 4);
+
+      ctx.restore();
+    }
+
+    function pointToCanvas(event) {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      return { x, y };
+    }
+
+    function angleFromPointer(x, y) {
+      const dx = x - state.pivotX;
+      const dy = y - state.pivotY;
+      const angle = Math.atan2(dx, dy);
+      return angle;
+    }
+
+    function onPointerDown(event) {
+      const p = pointToCanvas(event);
+      const bob = computeBobPosition();
+      const distance = Math.hypot(p.x - bob.x, p.y - bob.y);
+
+      if (distance <= pendulum.bobRadius + 15 || Math.abs(p.x - state.pivotX) < 30) {
+        state.dragging = true;
+        canvas.classList.add("dragging");
+        state.dragPointerId = event.pointerId;
+        state.lastPointerX = p.x;
+        state.lastPointerY = p.y;
+
+        pendulum.theta = angleFromPointer(p.x, p.y);
+        pendulum.omega = 0;
+      }
+    }
+
+    function onPointerMove(event) {
+      if (!state.dragging || event.pointerId !== state.dragPointerId) return;
+
+      const p = pointToCanvas(event);
+      const dx = p.x - state.lastPointerX;
+      const dy = p.y - state.lastPointerY;
+
+      const angle = angleFromPointer(p.x, p.y);
+      pendulum.theta = angle;
+
+      const dragSpeed = (dx * dx + dy * dy) ** 0.5;
+      pendulum.omega = (dragSpeed / 1800) * (dx < 0 ? -1 : 1);
+
+      state.lastPointerX = p.x;
+      state.lastPointerY = p.y;
+    }
+
+    function onPointerUp(event) {
+      if (event.pointerId !== state.dragPointerId) return;
+      state.dragging = false;
+      canvas.classList.remove("dragging");
+      state.dragPointerId = null;
+    }
+
+    function animate(timestamp) {
+      if (!state.lastTimestamp) state.lastTimestamp = timestamp;
+      const dt = Math.min((timestamp - state.lastTimestamp) / 1000, 0.033);
+      state.lastTimestamp = timestamp;
+
+      updatePhysics(dt);
+      drawBackground();
+      drawPendulum();
+
+      requestAnimationFrame(animate);
+    }
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointerleave", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+
+    window.addEventListener("resize", resizeCanvas, { passive: true });
+
+    resizeCanvas();
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
